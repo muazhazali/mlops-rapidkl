@@ -1,0 +1,31 @@
+services:
+  ml-train:
+    build:
+      context: .
+      dockerfile: Dockerfile.train
+    volumes:
+      - ./data:/app/data
+    profiles:
+      - train
+
+  ml-inference:
+    build:
+      context: .
+      dockerfile: Dockerfile.inference
+    volumes:
+      - ./data:/app/data
+    depends_on:
+      - ml-train
+    restart: unless-stopped
+
+  app-ui:
+    build:
+      context: .
+      dockerfile: Dockerfile.ui
+    volumes:
+      - ./data:/app/data
+    ports:
+      - "8050:8050"
+    depends_on:
+      - ml-inference
+    restart: unless-stopped

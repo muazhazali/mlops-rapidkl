@@ -1,0 +1,24 @@
+feature_engineering:
+  lag_days: [7, 14, 30]
+  rolling_windows: [7, 30]
+  train_cutoff: "2025-12-31"
+
+training:
+  model_type: catboost
+  target_col: ridership
+  iterations: 500
+  learning_rate: 0.05
+  depth: 6
+  random_seed: 42
+
+pipeline_runner:
+  inference_start: "2026-01-01"
+  inference_interval_seconds: 1
+
+ui:
+  update_interval_ms: 2000
+  default_lookback_days: 30
+  actual_data_path: data/07_model_output/actuals.parquet
+  predictions_path: data/07_model_output/predictions.parquet
+  od_data_path: data/02_intermediate/od_daily.parquet
+  station_daily_path: data/02_intermediate/station_daily.parquet

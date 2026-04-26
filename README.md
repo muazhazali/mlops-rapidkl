@@ -1,101 +1,113 @@
-# mlops
+# mlops-rapidkl
 
 [![Powered by Kedro](https://img.shields.io/badge/powered_by-kedro-ffc900?logo=kedro)](https://kedro.org)
 
-## Overview
+End-to-end MLOps pipeline for daily ridership forecasting across the KL Rapid Rail network (KJ LRT, AG LRT, Kajang MRT, Putrajaya MRT, Monorail). Predicts next-day station departures using CatBoost trained on 3 years of origin-destination data from [data.gov.my](https://data.gov.my/data-catalogue/ridership_od_rapidrail_daily).
 
-This is your new Kedro project, which was generated using `kedro 1.3.1`.
-
-Take a look at the [Kedro documentation](https://docs.kedro.org) to get started.
-
-## Rules and guidelines
-
-In order to get the best out of the template:
-
-* Don't remove any lines from the `.gitignore` file we provide
-* Make sure your results can be reproduced by following a data engineering convention
-* Don't commit data to your repository
-* Don't commit any credentials or your local configuration to your repository. Keep all your credentials and local configuration in `conf/local/`
-
-## How to install dependencies
-
-Declare any dependencies in `requirements.txt` for `pip` installation.
-
-To install them, run:
+## Architecture
 
 ```
-pip install -r requirements.txt
+data/01_raw/          ← OD ridership CSVs (2023–2026)
+    ↓  [Kedro: data_processing]
+data/02_intermediate/ ← station_daily.parquet + od_daily.parquet
+    ↓  [Kedro: training]
+data/05_model_input/  ← features_train.parquet + features_test.parquet
+data/06_models/       ← catboost_model.pkl
+data/07_model_output/ ← actuals.parquet + predictions.parquet
+    ↓
+entrypoints/inference.py  ← rolling replay (1 day/second)
+entrypoints/app_ui.py     ← Dash dashboard on :8050
 ```
 
-## How to run your Kedro pipeline
+**Tech stack:** Kedro · CatBoost · pandas · Dash + Plotly + Bootstrap · Docker · uv
 
-You can run your Kedro project with:
+## Dashboard
 
-```
-kedro run
-```
+- **Line → Station** drill-down in sidebar
+- **4 metric cards:** today's actual, predicted value, 30-day MAPE, Malaysian holiday flag
+- **Main chart:** predicted vs actual daily departures with forecast zone
+- **Top destinations:** OD-derived bar chart for selected origin station
+- **Day-of-week pattern:** 30-day average, weekday/weekend split
 
-## How to test your Kedro project
+## Quick start
 
-Have a look at the file `tests/test_run.py` for instructions on how to write your tests. You can run your tests as follows:
+### 1. Install dependencies
 
-```
-pytest
-```
-
-You can configure the coverage threshold in your project's `pyproject.toml` file under the `[tool.coverage.report]` section.
-
-
-## Project dependencies
-
-To see and update the dependency requirements for your project use `requirements.txt`. You can install the project requirements with `pip install -r requirements.txt`.
-
-[Further information about project dependencies](https://docs.kedro.org/en/stable/kedro_project_setup/dependencies.html#project-specific-dependencies)
-
-## How to work with Kedro and notebooks
-
-> Note: Using `kedro jupyter` or `kedro ipython` to run your notebook provides these variables in scope: `context`, 'session', `catalog`, and `pipelines`.
->
-> Jupyter, JupyterLab, and IPython are already included in the project requirements by default, so once you have run `pip install -r requirements.txt` you will not need to take any extra steps before you use them.
-
-### Jupyter
-To use Jupyter notebooks in your Kedro project, you need to install Jupyter:
-
-```
-pip install jupyter
+```bash
+uv pip install -r requirements.txt
 ```
 
-After installing Jupyter, you can start a local notebook server:
+### 2. Download raw data
 
+Place the CSVs in `data/01_raw/`:
 ```
-kedro jupyter notebook
-```
-
-### JupyterLab
-To use JupyterLab, you need to install it:
-
-```
-pip install jupyterlab
+rapidrail_2023_daily.csv
+rapidrail_2024_daily.csv
+rapidrail_2025_daily.csv
+rapidrail_2026_daily.csv
 ```
 
-You can also start JupyterLab:
+Source: https://data.gov.my/data-catalogue/ridership_od_rapidrail_daily
 
-```
-kedro jupyter lab
-```
+### 3. Train
 
-### IPython
-And if you want to run an IPython session:
-
-```
-kedro ipython
+```bash
+python entrypoints/training.py
 ```
 
-### How to ignore notebook output cells in `git`
-To automatically strip out all output cell contents before committing to `git`, you can use tools like [`nbstripout`](https://github.com/kynan/nbstripout). For example, you can add a hook in `.git/config` with `nbstripout --install`. This will run `nbstripout` before anything is committed to `git`.
+Runs the full Kedro pipeline: data processing → feature engineering → CatBoost training → test evaluation. Artifacts saved to `data/`.
 
-> *Note:* Your output cells will be retained locally.
+### 4. Run inference + UI
 
-## Package your Kedro project
+In two separate terminals:
 
-[Further information about building project documentation and packaging your project](https://docs.kedro.org/en/stable/deploy/package_a_project/#package-an-entire-kedro-project)
+```bash
+# Terminal 1 — rolling inference replay
+python entrypoints/inference.py
+
+# Terminal 2 — dashboard
+python entrypoints/app_ui.py
+```
+
+Open http://localhost:8050
+
+### 5. Docker (all-in-one)
+
+```bash
+# Step 1: train (run once)
+docker compose --profile train up ml-train --build
+
+# Step 2: inference + UI
+docker compose up ml-inference app-ui --build
+```
+
+## Configuration
+
+All parameters in `conf/base/parameters.yml`:
+
+| Key | Description |
+|-----|-------------|
+| `feature_engineering.lag_days` | Lag feature windows (default: 7, 14, 30 days) |
+| `feature_engineering.train_cutoff` | Train/test split date |
+| `training.iterations` | CatBoost iterations |
+| `pipeline_runner.inference_interval_seconds` | Replay speed (1 = 1 day/second) |
+| `ui.default_lookback_days` | Chart default window |
+
+## Project structure
+
+```
+conf/base/
+    catalog.yml       ← Kedro data catalog
+    parameters.yml    ← all tunable parameters
+src/mlops/
+    pipelines/
+        data_processing/  ← merge CSVs → station_daily, od_daily
+        training/         ← features, CatBoost, evaluation
+src/app_ui/
+    app.py            ← Dash layout + callbacks
+    utils.py          ← chart builders, data loaders
+entrypoints/
+    training.py       ← run Kedro default pipeline
+    inference.py      ← rolling replay loop
+    app_ui.py         ← start Dash server
+```

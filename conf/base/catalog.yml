@@ -1,4 +1,39 @@
-# Here you can define all your datasets by using simple YAML syntax.
-#
-# Documentation for this file format can be found in "The Data Catalog"
-# Link: https://docs.kedro.org/en/stable/catalog-data/introduction/#data-catalog
+raw_2023:
+  type: pandas.CSVDataset
+  filepath: data/01_raw/rapidrail_2023_daily.csv
+
+raw_2024:
+  type: pandas.CSVDataset
+  filepath: data/01_raw/rapidrail_2024_daily.csv
+
+raw_2025:
+  type: pandas.CSVDataset
+  filepath: data/01_raw/rapidrail_2025_daily.csv
+
+raw_2026:
+  type: pandas.CSVDataset
+  filepath: data/01_raw/rapidrail_2026_daily.csv
+
+station_daily:
+  type: pandas.ParquetDataset
+  filepath: data/02_intermediate/station_daily.parquet
+
+od_daily:
+  type: pandas.ParquetDataset
+  filepath: data/02_intermediate/od_daily.parquet
+
+features_train:
+  type: pandas.ParquetDataset
+  filepath: data/05_model_input/features_train.parquet
+
+features_test:
+  type: pandas.ParquetDataset
+  filepath: data/05_model_input/features_test.parquet
+
+catboost_model:
+  type: pickle.PickleDataset
+  filepath: data/06_models/catboost_model.pkl
+
+actuals:
+  type: pandas.ParquetDataset
+  filepath: data/07_model_output/actuals.parquet

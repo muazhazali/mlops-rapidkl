@@ -8,10 +8,10 @@ from kedro.framework.startup import bootstrap_project
 def run_training() -> None:
     project_path = Path(__file__).resolve().parent.parent
     bootstrap_project(project_path)
-    configure_project("free_bootcamp_mlacademy")
+    configure_project("mlops")
 
     with KedroSession.create(project_path=project_path) as session:
-        session.run(pipeline_name="training")
+        session.run()
     print("Training pipeline completed successfully!")
 
 

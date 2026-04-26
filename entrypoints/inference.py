@@ -1,76 +1,129 @@
+"""Rolling inference replay: walk forward through test dates, 1 day per sleep interval."""
+from __future__ import annotations
+
+import pickle
 import time
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import yaml
-from kedro.framework.project import configure_project
-from kedro.framework.session import KedroSession
-from kedro.framework.startup import bootstrap_project
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+sys_path_src = PROJECT_ROOT / "src"
+import sys
+sys.path.insert(0, str(sys_path_src))
+
+from mlops.pipelines.training.nodes import (
+    FEATURE_COLS,
+    MY_HOLIDAYS,
+    _add_holiday_features,
+)
+
+
+def _build_features_for_date(
+    history: pd.DataFrame,
+    target_date: pd.Timestamp,
+    lag_days: list[int],
+    rolling_windows: list[int],
+) -> pd.DataFrame:
+    """Build feature rows for all stations for target_date."""
+    stations = history["station"].unique()
+    rows = []
+
+    for station in stations:
+        h = history[history["station"] == station].sort_values("date")
+        past = h[h["date"] < target_date]
+        if past.empty:
+            continue
+
+        row: dict = {
+            "station": station,
+            "date": target_date,
+            "year": target_date.year,
+            "month": target_date.month,
+            "day": target_date.day,
+            "day_of_week": target_date.dayofweek,
+            "is_weekend": int(target_date.dayofweek >= 5),
+        }
+
+        for lag in lag_days:
+            lag_date = target_date - pd.Timedelta(days=lag)
+            match = past[past["date"] == lag_date]
+            row[f"lag_{lag}"] = match["ridership"].values[0] if not match.empty else np.nan
+
+        for w in rolling_windows:
+            row[f"rolling_mean_{w}"] = past["ridership"].tail(w).mean()
+
+        rows.append(row)
+
+    if not rows:
+        return pd.DataFrame()
+
+    feat = pd.DataFrame(rows)
+    feat["date"] = pd.to_datetime(feat["date"])
+    feat = _add_holiday_features(feat)
+    feat = feat.dropna(subset=[f"lag_{lag_days[-1]}"])
+    return feat
 
 
 def run_inference() -> None:
-    project_path = Path(__file__).resolve().parent.parent
-    bootstrap_project(project_path)
-    configure_project("free_bootcamp_mlacademy")
-
-    # Load parameters from the configuration file
-    params_path = project_path / "conf" / "base" / "parameters.yml"
-    with open(params_path) as f:
+    with open(PROJECT_ROOT / "conf" / "base" / "parameters.yml") as f:
         params = yaml.safe_load(f)
 
-    # Load catalog to get data paths
-    catalog_path = project_path / "conf" / "base" / "catalog.yml"
-    with open(catalog_path) as f:
-        catalog = yaml.safe_load(f)
+    model_path = PROJECT_ROOT / "data" / "06_models" / "catboost_model.pkl"
+    station_daily_path = PROJECT_ROOT / "data" / "02_intermediate" / "station_daily.parquet"
+    actuals_path = PROJECT_ROOT / "data" / "07_model_output" / "actuals.parquet"
+    predictions_path = PROJECT_ROOT / "data" / "07_model_output" / "predictions.parquet"
 
-    runner_config = params["pipeline_runner"]
+    with open(model_path, "rb") as f:
+        model = pickle.load(f)
 
-    # Load inference data from catalog
-    inference_data_path = project_path / catalog["inference_data"]["filepath"]
-    data = pd.read_parquet(inference_data_path)
-    data["datetime"] = pd.to_datetime(data["datetime"])
-    data = data.reset_index(drop=True)
+    history = pd.read_parquet(station_daily_path)
+    history["date"] = pd.to_datetime(history["date"])
 
-    # Parse config
-    batch_size = runner_config["batch_size"]
-    first_timestamp = pd.to_datetime(runner_config["first_timestamp"])
-    num_steps = runner_config["num_steps_inference"]
-    interval_seconds = runner_config["inference_interval_seconds"]
+    runner_cfg = params["pipeline_runner"]
+    inference_start = pd.to_datetime(runner_cfg["inference_start"])
+    interval_sec = runner_cfg["inference_interval_seconds"]
 
-    # Find first index matching the start timestamp
-    first_idx = data[data["datetime"] >= first_timestamp].index[0]
+    lag_days: list[int] = params["feature_engineering"]["lag_days"]
+    rolling_windows: list[int] = params["feature_engineering"]["rolling_windows"]
+
+    test_dates = sorted(history[history["date"] >= inference_start]["date"].unique())
+
+    predictions_path.parent.mkdir(parents=True, exist_ok=True)
 
     while True:
-        # Clear predictions file to start fresh
-        predictions_path = project_path / catalog["predictions_with_timestamps"]["filepath"]
         if predictions_path.exists():
             predictions_path.unlink()
-            print("Cleared previous predictions")
+            print("Cleared previous predictions.")
 
-        print(f"Starting inference: {num_steps} steps, batch_size={batch_size}")
+        print(f"Starting inference replay: {len(test_dates)} dates")
 
-        for step in range(num_steps):
-            current_idx = first_idx + step
-            batch_start = max(0, current_idx - batch_size + 1)
-            batch_end = current_idx + 1
+        for i, target_date in enumerate(test_dates):
+            feat = _build_features_for_date(history, target_date, lag_days, rolling_windows)
+            if feat.empty:
+                continue
 
-            batch = data.iloc[batch_start:batch_end].copy()
+            preds_raw = model.predict(feat[FEATURE_COLS])
+            preds_raw = np.maximum(preds_raw, 0)
 
-            # Save batch to catalog location
-            batch_path = project_path / catalog["inference_batch"]["filepath"]
-            batch_path.parent.mkdir(parents=True, exist_ok=True)
-            batch.to_parquet(batch_path, index=False)
+            result = feat[["station", "date"]].copy()
+            result["prediction"] = preds_raw.round().astype(int)
 
-            # Run pipeline
-            with KedroSession.create(project_path=project_path) as session:
-                session.run(pipeline_name="inference")
+            if predictions_path.exists():
+                existing = pd.read_parquet(predictions_path)
+                result = pd.concat([existing, result], ignore_index=True)
+            result.to_parquet(predictions_path, index=False)
 
-            print(f"[{step + 1}/{num_steps}] Prediction saved")
+            print(f"[{i + 1}/{len(test_dates)}] {target_date.date()} — {len(feat)} stations predicted")
 
-            if step < num_steps - 1:
-                time.sleep(interval_seconds)
+            if i < len(test_dates) - 1:
+                time.sleep(interval_sec)
 
-        print("Inference loop completed! Restarting...")
+        print("Replay complete. Restarting...")
+
 
 if __name__ == "__main__":
     run_inference()

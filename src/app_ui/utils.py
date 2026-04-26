@@ -103,10 +103,17 @@ def create_main_chart(
         ))
 
         if now:
-            fig.add_vline(
-                x=str(now), line_width=1.5, line_dash="dash", line_color="#888",
-                annotation_text="now", annotation_position="top right",
-                annotation_font=dict(color="#888", size=11),
+            now_ms = now.timestamp() * 1000
+            fig.add_shape(
+                type="line",
+                xref="x", yref="paper",
+                x0=now_ms, x1=now_ms, y0=0, y1=1,
+                line=dict(width=1.5, dash="dash", color="#888"),
+            )
+            fig.add_annotation(
+                x=now_ms, xref="x", yref="paper", y=1.02,
+                text="now", showarrow=False,
+                font=dict(color="#888", size=11),
             )
     else:
         now = None

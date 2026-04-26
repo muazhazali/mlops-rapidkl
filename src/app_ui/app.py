@@ -175,7 +175,7 @@ app.layout = dbc.Container(
                         ),
                         # Main chart
                         dbc.Card(
-                            dcc.Graph(id="main-chart", config={"displayModeBar": False}),
+                            dcc.Graph(id="main-chart", config={"displayModeBar": "hover", "modeBarButtonsToRemove": ["select2d", "lasso2d", "autoScale2d"], "toImageButtonOptions": {"format": "png", "scale": 2}}),
                             className="chart-card mb-3",
                         ),
                         # Bottom panels
@@ -183,14 +183,14 @@ app.layout = dbc.Container(
                             [
                                 dbc.Col(
                                     dbc.Card(
-                                        dcc.Graph(id="top-dest-chart", config={"displayModeBar": False}),
+                                        dcc.Graph(id="top-dest-chart", config={"displayModeBar": "hover", "modeBarButtonsToRemove": ["select2d", "lasso2d", "autoScale2d"], "toImageButtonOptions": {"format": "png", "scale": 2}}),
                                         className="chart-card",
                                     ),
                                     width=6,
                                 ),
                                 dbc.Col(
                                     dbc.Card(
-                                        dcc.Graph(id="dow-chart", config={"displayModeBar": False}),
+                                        dcc.Graph(id="dow-chart", config={"displayModeBar": "hover", "modeBarButtonsToRemove": ["select2d", "lasso2d", "autoScale2d"], "toImageButtonOptions": {"format": "png", "scale": 2}}),
                                         className="chart-card",
                                     ),
                                     width=6,

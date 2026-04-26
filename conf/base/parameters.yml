@@ -14,6 +14,7 @@ training:
 pipeline_runner:
   inference_start: "2026-01-01"
   inference_interval_seconds: 1
+  future_forecast_days: 365
 
 ui:
   update_interval_ms: 2000

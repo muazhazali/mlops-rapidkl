@@ -5,8 +5,7 @@ services:
       dockerfile: Dockerfile.train
     volumes:
       - ./data:/app/data
-    profiles:
-      - train
+    restart: "no"
 
   ml-inference:
     build:
@@ -15,7 +14,8 @@ services:
     volumes:
       - ./data:/app/data
     depends_on:
-      - ml-train
+      ml-train:
+        condition: service_completed_successfully
     restart: unless-stopped
 
   app-ui:
@@ -27,5 +27,6 @@ services:
     ports:
       - "8050:8050"
     depends_on:
-      - ml-inference
+      ml-train:
+        condition: service_completed_successfully
     restart: unless-stopped
